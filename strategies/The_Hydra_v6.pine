@@ -1,0 +1,50 @@
+//@version=6
+strategy("The Hydra", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.05, process_orders_on_close=true)
+
+// --- 1. STRATEGY INPUTS ---
+int fastLen = input.int(9, "Fast Length", group="Strategy")
+int slowLen = input.int(21, "Slow Length", group="Strategy")
+int adxLen = input.int(14, "ADX Length", group="Strategy")
+float adxThreshold = input.float(25.0, "ADX Threshold", group="Strategy")
+
+// --- 2. RISK MANAGEMENT ---
+float stopLossPct = input.float(1.5, "Stop Loss (%)", minval=0.1, step=0.1, group="Risk") / 100
+float takeProfitPct = input.float(3.0, "Take Profit (%)", minval=0.1, step=0.1, group="Risk") / 100
+
+// --- 3. DATE RANGE FILTER ---
+bool useDate = input.bool(true, "Filter Date Range", group="Backtest")
+int startYear = input.int(2023, "Start Year", group="Backtest")
+bool inDate = not useDate or time >= timestamp(startYear, 1, 1, 0, 0)
+
+// --- 4. INDICATORS ---
+float fastMA = ta.ema(close, fastLen)
+float slowMA = ta.ema(close, slowLen)
+[diplus, diminus, adxVal] = ta.dmi(length=adxLen)
+
+// --- 5. LOGIC & EXECUTION ---
+bool longCond = ta.crossover(fastMA, slowMA) and (adxVal > adxThreshold) and inDate
+bool shortCond = ta.crossunder(fastMA, slowMA) and inDate
+
+if longCond
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Exit Long", from_entry="Long", stop=close * (1 - stopLossPct), limit=close * (1 + takeProfitPct))
+
+if shortCond
+    strategy.close("Long")
+
+// --- 6. DASHBOARD ---
+var table dash = table.new(position.top_right, 3, 2, bgcolor=color.new(color.black, 50))
+if barstate.islast
+    table.cell(dash, 0, 0, "Metric", text_color=color.white)
+    table.cell(dash, 1, 0, "Value", text_color=color.white)
+    table.cell(dash, 2, 0, "ADX Strength", text_color=color.white)
+
+    table.cell(dash, 0, 1, "Trend", text_color=color.white)
+    table.cell(dash, 1, 1, fastMA > slowMA ? "BULLISH" : "BEARISH", text_color=fastMA > slowMA ? color.green : color.red)
+
+    // Gradient color for ADX value
+    color adxColor = color.from_gradient(adxVal, 0, 50, color.red, color.green)
+    table.cell(dash, 2, 1, str.tostring(adxVal), text_color=adxColor)
+
+plot(fastMA, "Fast", color=color.new(color.green, 0))
+plot(slowMA, "Slow", color=color.new(color.red, 0))

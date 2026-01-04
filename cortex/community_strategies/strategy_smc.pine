@@ -1,0 +1,56 @@
+/*
+ * COMMUNITY STRATEGY: Smart Money Concepts (SMC) + FVG
+ * AUTHOR: QuantForge Community Pack
+ * SOURCE: Institutional Logic (LuxAlgo inspired)
+ */
+//@version=6
+strategy("COMMUNITY: SMC Order Blocks & FVG [QuantForge]", overlay = true, process_orders_on_close = true)
+
+// --- SETTINGS ---
+grp_smc = "SMC Settings"
+swing_len = input.int(10, "Swing Length", group=grp_smc)
+bull_color = input.color(color.new(#00ffbb, 50), "Bullish OB", group=grp_smc)
+bear_color = input.color(color.new(#ff1100, 50), "Bearish OB", group=grp_smc)
+
+// --- LOGIC: SWING POINTS ---
+ph = ta.pivothigh(high, swing_len, swing_len)
+pl = ta.pivotlow(low, swing_len, swing_len)
+
+var float high_structure = na
+var float low_structure = na
+
+// Market Structure Shift (MSS) detection
+if not na(ph)
+    high_structure := ph
+if not na(pl)
+    low_structure := pl
+
+// --- LOGIC: FAIR VALUE GAPS (FVG) ---
+// Bullish FVG: Low of candle 1 > High of candle 3
+fvg_bull = low[2] > high[0] and close[1] > open[1]
+// Bearish FVG: High of candle 1 < Low of candle 3
+fvg_bear = high[2] < low[0] and close[1] < open[1]
+
+// Plot FVGs
+var box[] fvg_boxes = array.new_box()
+if fvg_bull
+    array.push(fvg_boxes, box.new(bar_index[2], low[2], bar_index, high[0], border_color = na, bgcolor = bull_color))
+if fvg_bear
+    array.push(fvg_boxes, box.new(bar_index[2], high[2], bar_index, low[0], border_color = na, bgcolor = bear_color))
+
+// cleanup old boxes
+if array.size(fvg_boxes) > 50
+    box.delete(array.shift(fvg_boxes))
+
+// --- STRATEGY EXECUTION ---
+// Buy on Retest of Bullish FVG
+if fvg_bull
+    strategy.entry("Long FVG", strategy.long)
+
+// Sell on Retest of Bearish FVG
+if fvg_bear
+    strategy.entry("Short FVG", strategy.short)
+
+// Risk Management
+strategy.exit("Exit Long", "Long FVG", profit = close * 0.03, loss = close * 0.015)
+strategy.exit("Exit Short", "Short FVG", profit = close * 0.03, loss = close * 0.015)

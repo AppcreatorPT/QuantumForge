@@ -1,0 +1,37 @@
+/*
+ * COMMUNITY STRATEGY: Volatility Breakout (VIX Fix)
+ * AUTHOR: QuantForge Community Pack
+ * SOURCE: Classic VIX Fix + ATR Breakout
+ */
+//@version=6
+strategy("COMMUNITY: Volatility Apex [QuantForge]", overlay = true, process_orders_on_close = true)
+
+// --- INDICATORS ---
+// Bollinger Bands for Squeeze detection
+[middle, upper, lower] = ta.bb(close, 20, 2.0)
+width = (upper - lower) / middle
+
+// Keltner Channels for explosion verification
+[kc_mid, kc_upper, kc_lower] = ta.kc(close, 20, 1.5)
+
+// --- LOGIC: SQUEEZE & FIRE ---
+bool squeeze_on = lower > kc_lower and upper < kc_upper
+bool squeeze_fired = not squeeze_on and squeeze_on[1]
+
+// VIX Fix (Synthetic VIX) to detect bottoms
+float wvfs = (ta.highest(close, 22) - low) / ta.highest(close, 22) * 100
+bool panic_bottom = wvfs > 10.0 // High fear reading
+
+// --- EXECUTION ---
+// Long on Volatility Expansion upwards + Fear Bottom
+if squeeze_fired and close > upper
+    strategy.entry("Vol Breakout Long", strategy.long)
+    
+// Short on Volatility Expansion downwards
+if squeeze_fired and close < lower
+    strategy.entry("Vol Breakout Short", strategy.short)
+
+// ATR Trailing Stop
+float atr = ta.atr(14)
+strategy.exit("Exit Long", "Vol Breakout Long", trail_price = close, trail_offset = atr * 1.5 / syminfo.mintick)
+strategy.exit("Exit Short", "Vol Breakout Short", trail_price = close, trail_offset = atr * 1.5 / syminfo.mintick)

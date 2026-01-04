@@ -1,0 +1,11 @@
+{
+    "name": "trade-os-root",
+    "version": "1.0.0",
+    "description": "Root orchestrator for TradeOS (Cortex + Backend + Frontend)",
+    "scripts": {
+        "dev": "concurrently -n \"CORTEX,BACKEND,FRONTEND\" -c \"yellow,blue,green\" \"py cortex/main.py\" \"cd backend && node index.js\" \"cd frontend && npm run dev\""
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.0"
+    }
+}

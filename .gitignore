@@ -1,0 +1,6 @@
+# Allow agent config
+!.agent/
+
+node_modules/
+__pycache__/
+.env
