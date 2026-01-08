@@ -35,11 +35,29 @@ def run_simulation(symbol, logic_code, timeframe='1h'):
     # We subclass Strategy locally to avoid state pollution
     class UserStrategy(Strategy):
         def init(self):
-            # Pre-calc common indicators using pandas_ta wrapper for Backtesting.py
-            # Note: Backtesting.py requires indicators to be wrapped in self.I
-            self.rsi = self.I(ta.rsi, pd.Series(self.data.Close), 14)
+            # STANDARD TOOLBELT (Pre-Calculated for AI Logic)
+            # 1. Moving Averages
             self.sma_fast = self.I(ta.sma, pd.Series(self.data.Close), 14)
             self.sma_slow = self.I(ta.sma, pd.Series(self.data.Close), 28)
+            self.ema_fast = self.I(ta.ema, pd.Series(self.data.Close), 9)
+            self.ema_slow = self.I(ta.ema, pd.Series(self.data.Close), 21)
+
+            # 2. Momentum
+            self.rsi = self.I(ta.rsi, pd.Series(self.data.Close), 14)
+            
+            # 3. Volatility (Bollinger Bands)
+            # Note: pandas_ta returns a DataFrame for BBANDS, we need to extract columns carefully
+            # For simplicity in Backtesting.py, we wrap a helper or use discrete calls if needed
+            # Here we assume a simple TA-Lib wrapper or we construct manually for safety
+            self.bb_upper = self.I(lambda x: ta.bbands(pd.Series(x), length=20, std=2)['BBU_20_2.0'], self.data.Close)
+            self.bb_lower = self.I(lambda x: ta.bbands(pd.Series(x), length=20, std=2)['BBL_20_2.0'], self.data.Close)
+
+            # 4. Trend (MACD)
+            self.macd = self.I(lambda x: ta.macd(pd.Series(x), fast=12, slow=26, signal=9)['MACD_12_26_9'], self.data.Close)
+            self.macd_signal = self.I(lambda x: ta.macd(pd.Series(x), fast=12, slow=26, signal=9)['MACDs_12_26_9'], self.data.Close)
+
+            # 5. ATR
+            self.atr = self.I(ta.atr, pd.Series(self.data.High), pd.Series(self.data.Low), pd.Series(self.data.Close), 14)
             
         def next(self):
             # INJECTED LOGIC EXECUTION

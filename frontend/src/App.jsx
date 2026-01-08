@@ -1,27 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
-import { Cpu, ShieldCheck, Zap, FileCode, User, Bot, Activity } from 'lucide-react';
+import Split from 'react-split';
 import Sidebar from './components/Sidebar';
-import CodeBlock from './components/CodeBlock'; // Added based on instruction's code edit snippet
-import AssistantMessage from './components/AssistantMessage';
-import InputArea from './components/InputArea';
+import ChatPanel from './components/ChatPanel';
+import CodeEditorPanel from './components/CodeEditorPanel';
 import ParticleBackground from './components/ParticleBackground';
-import DropZone from './components/DropZone';
-
-// SUGGESTIONS DATA
-const SUGGESTIONS = [
-  { icon: <Cpu size={24} />, title: 'Deep Strategy', prompt: 'Create a multi-frame trend strategy with ADX filter.' },
-  { icon: <ShieldCheck size={24} />, title: 'Risk Guard', prompt: 'Add dynamic Position Sizing based on ATR volatility.' },
-  { icon: <Zap size={24} />, title: 'Quick Fix', prompt: 'Why is my "strategy.exit" not triggering correctly?' },
-  { icon: <FileCode size={24} />, title: 'V6 Upgrade', prompt: 'Convert this v5 script to strictly typed v6 code.' }
-];
 
 function App() {
   // --- STATE WITH PERSISTENCE ---
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
-  const [image, setImage] = useState(null); // Base64 Image
+  const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [activeCode, setActiveCode] = useState('// Pine Script v6 Editor Ready...');
+  const [activeSymbol, setActiveSymbol] = useState("BINANCE:BTCUSDT"); // Default for Chart & Sim
 
   // Lazy Load Sessions from LocalStorage
   const [sessions, setSessions] = useState(() => {
@@ -32,16 +24,13 @@ function App() {
     return [{ id: Date.now(), title: 'New Strategy', messages: [] }];
   });
 
-  // Lazy Load Current Session ID
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     const saved = localStorage.getItem('quantforge_current_id');
     if (saved) {
       return Number(saved);
     }
-    return sessions[0].id; // Fallback to first session
+    return sessions[0].id;
   });
-
-  const messagesEndRef = useRef(null);
 
   // --- EFFECT: PERSIST TO LOCAL STORAGE ---
   useEffect(() => {
@@ -49,19 +38,15 @@ function App() {
     localStorage.setItem('quantforge_current_id', currentSessionId);
   }, [sessions, currentSessionId]);
 
-  // --- EFFECT: SCROLL ---
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-  useEffect(() => { scrollToBottom(); }, [messages, loading]);
-
   // --- EFFECT: LOAD SESSION MESSAGES ---
   useEffect(() => {
     const session = sessions.find(s => s.id === currentSessionId);
     if (session) {
       setMessages(session.messages);
+      // Try to find the latest code in history
+      const lastCodeMsg = [...session.messages].reverse().find(m => m.role === 'assistant' && typeof m.code === 'string');
+      if (lastCodeMsg) setActiveCode(lastCodeMsg.code);
     } else if (sessions.length > 0) {
-      // Fallback if current ID invalid
       setMessages(sessions[0].messages);
       setCurrentSessionId(sessions[0].id);
     }
@@ -81,7 +66,7 @@ function App() {
 
     window.addEventListener('strategy-action', handleAction);
     return () => window.removeEventListener('strategy-action', handleAction);
-  }, [messages, sessions]); // Re-bind if state changes relevantly, though handleSend is closure-dependent
+  }, [messages, sessions]);
 
   // --- ACTIONS ---
   const createNewSession = () => {
@@ -89,6 +74,7 @@ function App() {
     const newSession = { id: newId, title: 'New Strategy', messages: [] };
     setSessions(prev => [newSession, ...prev]);
     setCurrentSessionId(newId);
+    setActiveCode('// New Session Ready');
   };
 
   const deleteSession = (e, id) => {
@@ -112,24 +98,32 @@ function App() {
     handleSend(command);
   };
 
+  // --- MAIN SEND LOGIC ---
   const handleSend = async (text = input) => {
     if (!text.trim() && !image) return;
 
-    const newMsg = { role: 'user', content: text, image: image }; // Store image in local history
+    // Detect Symbol Change (@ETH)
+    const match = text.match(/@([a-zA-Z0-9]+)/);
+    if (match) {
+      const symbol = match[1].toUpperCase();
+      // Basic mapping logic (could be improved later)
+      const fullSymbol = `BINANCE:${symbol}USDT`;
+      setActiveSymbol(fullSymbol);
+    }
+
+    const newMsg = { role: 'user', content: text, image: image };
     const updatedMessages = [...messages, newMsg];
 
     setMessages(updatedMessages);
     setInput('');
-    setImage(null); // Clear image after send
+    setImage(null);
     setLoading(true);
 
-    // Update session title if first message
     if (messages.length === 0) {
       updateSessionTitle(currentSessionId, text || "Image Analysis");
     }
 
     try {
-      // Send History for Context-Aware Fixes (and Image if present)
       const response = await fetch('http://localhost:3000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -138,19 +132,31 @@ function App() {
 
       const data = await response.json();
 
-      let botContent = data.response;
+      let botContent = data.response; // Legacy string (Chat Panel uses this for rendering text)
+      let botCode = null;
+
       if (!botContent && data.error) {
         botContent = `⚠️ **System Error**: ${data.error}`;
       } else if (!botContent) {
         botContent = "⚠️ **Unknown Error**: Received empty response from Cortex.";
       }
 
-      const botMsg = { role: 'assistant', content: botContent };
+      // Phase 3: Structured Data Handling
+      if (data.data && data.data.code) {
+        botCode = data.data.code;
+        setActiveCode(botCode); // UPDATE EDITOR AUTOMATICALLY
+      }
+
+      const botMsg = {
+        role: 'assistant',
+        content: botContent,
+        code: botCode, // Store code in history meta-data
+        data: data.data // Pass full structured object for clean rendering
+      };
 
       const finalMessages = [...updatedMessages, botMsg];
       setMessages(finalMessages);
 
-      // Persist to session
       setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, messages: finalMessages } : s));
 
     } catch (error) {
@@ -176,30 +182,23 @@ function App() {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-
     const items = e.dataTransfer.items;
     for (let i = 0; i < items.length; i++) {
       if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
         const blob = items[i].getAsFile();
         const reader = new FileReader();
-        reader.onload = (event) => {
-          setImage(event.target.result);
-        };
+        reader.onload = (event) => { setImage(event.target.result); };
         reader.readAsDataURL(blob);
-        return; // processed
+        return;
       }
     }
   };
 
   return (
-    <div className="app-container"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
+    <div className="app-container flex h-screen w-screen overflow-hidden bg-[var(--bg-deep)] text-white">
       <ParticleBackground />
-      <DropZone visible={isDragging} />
-      {/* SIDEBAR */}
+
+      {/* SIDEBAR (Leftmost) */}
       <Sidebar
         sessions={sessions}
         currentSessionId={currentSessionId}
@@ -208,76 +207,53 @@ function App() {
         deleteSession={deleteSession}
       />
 
-      {/* MAIN CHAT */}
-      <div className="chat-area">
-        {messages.length === 0 ? (
-          <div className="welcome-container">
-            <div className="welcome-header" style={{ textAlign: 'center' }}>
-              <div style={{ display: 'inline-flex', padding: '6px 12px', borderRadius: '20px', background: 'hsla(270, 85%, 70%, 0.1)', color: 'var(--cyber-purple)', fontSize: '11px', fontWeight: 'bold', marginBottom: '16px', letterSpacing: '1px', border: '1px solid hsla(270, 85%, 70%, 0.2)', textTransform: 'uppercase' }}>
-                Ready to Forge
-              </div>
-              <h2 className="text-gradient" style={{ fontSize: '48px', marginBottom: '10px' }}>QuantForge AI</h2>
-              <p style={{ color: 'var(--text-dim)', fontSize: '16px' }}>Institutional Grade Pine Script Architect.</p>
-            </div>
-            <div className="cards-grid" style={{ marginTop: '40px' }}>
-              {SUGGESTIONS.map((card, idx) => (
-                <div key={idx} className="suggestion-card" onClick={() => handleSend(card.prompt)}>
-                  <div className="card-icon">{card.icon}</div>
-                  <h3 className="card-title">{card.title}</h3>
-                  <p className="card-prompt">{card.prompt}</p>
-                </div>
-              ))}
-            </div>
+      {/* SPLIT SCREEN AREA: Explicit Width Constraint */}
+      <div
+        className="h-full relative z-10 overflow-hidden min-w-0"
+        style={{ width: 'calc(100vw - 280px)' }} // HARD FIX: Force exact remaining width
+      >
+        <Split
+          className="split-container"
+          sizes={[35, 65]}
+          minSize={300}
+          expandToMin={false}
+          gutterSize={6}
+          gutterAlign="center"
+          snapOffset={30}
+          dragInterval={1}
+          direction="horizontal"
+          cursor="col-resize"
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={() => setIsDragging(false)}
+        >
+          {/* LEFT: CHAT PANEL */}
+          <div className="split-panel flex flex-col h-full w-full min-w-0">
+            <ChatPanel
+              messages={messages}
+              loading={loading}
+              input={input}
+              setInput={setInput}
+              image={image}
+              setImage={setImage}
+              handleSend={handleSend}
+              onReportError={handleErrorFix}
+              isDragging={isDragging}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            />
           </div>
-        ) : (
-          <div className="messages-list">
-            <div style={{ maxWidth: '1000px', margin: '0 auto', width: '100%' }}>
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`message-row ${msg.role}`}>
-                  <div className="message-content-wrapper" style={{ display: 'flex', gap: '16px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', width: '100%' }}>
-                    <div className={`avatar ${msg.role}`}>
-                      {msg.role === 'user' ? <User size={20} color="#fff" /> : <Bot size={20} color="var(--cyber-green)" />}
-                    </div>
-                    <div className={`message-bubble ${msg.role === 'user' ? 'user' : ''}`}>
-                      {msg.role === 'user' ? (
-                        <div>{msg.content}</div>
-                      ) : (
-                        <AssistantMessage content={msg.content} />
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {loading && (
-                <div className="message-row assistant">
-                  <div className="message-content-wrapper" style={{ display: 'flex', gap: '16px' }}>
-                    <div className="avatar assistant"><Bot size={20} color="var(--cyber-green)" /></div>
-                    <div className="glass-panel" style={{ padding: '12px 24px', borderRadius: '12px', borderBottomLeftRadius: '4px' }}>
-                      <div className="scanner-container">
-                        <div className="scanner-bar" style={{ animationDelay: '0s' }}></div>
-                        <div className="scanner-bar" style={{ animationDelay: '0.2s' }}></div>
-                        <div className="scanner-bar" style={{ animationDelay: '0.4s' }}></div>
-                        <span className="scanner-text" style={{ marginLeft: '12px' }}>PROCESSING...</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-        )}
 
-        {/* INPUT AREA */}
-        <InputArea
-          input={input}
-          setInput={setInput}
-          image={image}
-          setImage={setImage}
-          loading={loading}
-          handleSend={handleSend}
-          onReportError={handleErrorFix}
-        />
+          {/* RIGHT: EDITOR PANEL (Code + Chart + Sim) */}
+          <div className="split-panel flex flex-col h-full w-full min-w-0">
+            <CodeEditorPanel
+              code={activeCode}
+              setCode={setActiveCode}
+              activeSymbol={activeSymbol}
+              isResizing={isDragging}
+            />
+          </div>
+        </Split>
       </div>
     </div>
   );
